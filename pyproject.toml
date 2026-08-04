@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deskhours"
+version = "0.1.0"
+description = "Count time at your computer from real keyboard/mouse activity and remind you when the day gets long."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Alisa Tsvetkova" }]
+keywords = ["productivity", "worktime", "idle", "reminder", "desktop"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Utilities",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/energetic-alice/deskhours"
+Repository = "https://github.com/energetic-alice/deskhours"
+Issues = "https://github.com/energetic-alice/deskhours/issues"
+
+[project.scripts]
+deskhours = "deskhours.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

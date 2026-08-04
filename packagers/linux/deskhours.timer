@@ -1,0 +1,11 @@
+[Unit]
+Description=Run deskhours every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=deskhours.service
+
+[Install]
+WantedBy=timers.target

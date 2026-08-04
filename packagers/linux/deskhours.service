@@ -1,0 +1,8 @@
+[Unit]
+Description=deskhours activity poll
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=deskhours tick --threshold 8
+# Prefer a user-session PATH that includes the installed console script.
