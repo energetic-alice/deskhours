@@ -2,8 +2,6 @@
 
 Count **time at your computer** from real keyboard/mouse activity, and remind yourself when the day gets long.
 
-Not app tracking. Not Screen Time. Just: *was there input recently?*
-
 ## How it works
 
 1. A small background job polls idle time every few minutes.
