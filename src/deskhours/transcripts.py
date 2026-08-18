@@ -18,11 +18,18 @@ Three agent harnesses keep a session log on disk, each with its own layout:
 Counting rule: a slot counts as active when it holds at least one HUMAN prompt. Counting
 agent-side lines instead would turn a long unattended run or an overnight monitor into
 active time.
+
+Projects are discovered, not configured: whatever directories a harness has created are
+read. Only the harness root itself is fixed, and an environment variable moves it when a
+harness has been relocated. Searching the disk for transcripts instead would be worse than
+it sounds — a sandboxed agent session can hold a nested copy of the very same layout, and
+counting that would credit an agent's own turns as time a person spent working.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import defaultdict
 from datetime import date, datetime
@@ -32,14 +39,43 @@ from typing import Iterable
 from deskhours.config import SLOT_MINUTES
 from deskhours.core import Slot, slot_at
 
-CURSOR_ROOT = Path.home() / ".cursor" / "projects"
-CLAUDE_ROOT = Path.home() / ".claude" / "projects"
-CODEX_ROOTS = (
-    Path.home() / ".codex" / "sessions",
-    Path.home() / ".codex" / "archived_sessions",
-)
-
 ALL_HARNESSES = ("cursor", "claude", "codex")
+
+
+def _from_env(name: str, *default: Path) -> tuple[Path, ...]:
+    """Read the roots for one harness, allowing an override in the environment.
+
+    Several paths are joined the way the platform joins PATH, so one variable can carry
+    the live and archived directories a harness keeps apart.
+    """
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    return tuple(Path(part).expanduser() for part in raw.split(os.pathsep) if part)
+
+
+def cursor_roots() -> tuple[Path, ...]:
+    return _from_env("DESKHOURS_CURSOR_ROOT", Path.home() / ".cursor" / "projects")
+
+
+def claude_roots() -> tuple[Path, ...]:
+    return _from_env("DESKHOURS_CLAUDE_ROOT", Path.home() / ".claude" / "projects")
+
+
+def codex_roots() -> tuple[Path, ...]:
+    return _from_env(
+        "DESKHOURS_CODEX_ROOTS",
+        Path.home() / ".codex" / "sessions",
+        Path.home() / ".codex" / "archived_sessions",
+    )
+
+
+def all_roots() -> dict[str, tuple[Path, ...]]:
+    return {
+        "cursor": cursor_roots(),
+        "claude": claude_roots(),
+        "codex": codex_roots(),
+    }
 
 _CURSOR_TS = re.compile(
     r"<timestamp>[A-Za-z]+, ([A-Za-z]{3,9}) (\d{1,2}), (\d{4}), (\d{1,2}):(\d{2}) ([AP]M) \(UTC"
@@ -160,7 +196,7 @@ def claude_human_text(obj: dict) -> str | None:
     return text
 
 
-def _codex_session_meta(lines: Iterable[str]) -> tuple[str | None, bool]:
+def codex_session_meta(lines: Iterable[str]) -> tuple[str | None, bool]:
     """Return the session cwd and whether the session belongs to a subagent."""
     cwd: str | None = None
     subagent = False
@@ -179,12 +215,23 @@ def _codex_session_meta(lines: Iterable[str]) -> tuple[str | None, bool]:
     return cwd, subagent
 
 
-def collect_cursor(days: dict, slot_minutes: int, root: Path | None = None,
+def _files(roots: Iterable[Path | str] | None, fallback: Iterable[Path], pattern: str) -> list[Path]:
+    """Every file matching the pattern under any root, de-duplicated and ordered.
+
+    A root that does not exist yields nothing rather than failing, which is what makes a
+    machine with only one of the three harnesses installed work without configuration.
+    """
+    found: set[Path] = set()
+    for root in roots or fallback:
+        found.update(Path(root).glob(pattern))
+    return sorted(found)
+
+
+def collect_cursor(days: dict, slot_minutes: int, roots: Iterable[Path | str] | None = None,
                    project: str | None = None) -> int:
     """Cursor: pull the local-time wrapper straight out of each transcript."""
     prompts = 0
-    root = root or CURSOR_ROOT
-    for path in sorted(root.glob("*/agent-transcripts/*/*.jsonl")):
+    for path in _files(roots, cursor_roots(), "*/agent-transcripts/*/*.jsonl"):
         if not _matches_project(path.parts[-4], project):
             continue
         try:
@@ -201,12 +248,11 @@ def collect_cursor(days: dict, slot_minutes: int, root: Path | None = None,
     return prompts
 
 
-def collect_claude(days: dict, slot_minutes: int, root: Path | None = None,
+def collect_claude(days: dict, slot_minutes: int, roots: Iterable[Path | str] | None = None,
                    project: str | None = None) -> int:
     """Claude Code: per-line UTC timestamps, human turns only."""
     prompts = 0
-    root = root or CLAUDE_ROOT
-    for path in sorted(root.glob("*/*.jsonl")):
+    for path in _files(roots, claude_roots(), "*/*.jsonl"):
         if not _matches_project(path.parent.name, project):
             continue
         for line in _read_lines(path):
@@ -220,16 +266,14 @@ def collect_claude(days: dict, slot_minutes: int, root: Path | None = None,
     return prompts
 
 
-def collect_codex(days: dict, slot_minutes: int, roots: Iterable[Path] | None = None,
+def collect_codex(days: dict, slot_minutes: int, roots: Iterable[Path | str] | None = None,
                   project: str | None = None) -> int:
     """Codex: top-level user_message events, scoped by the session cwd."""
     prompts = 0
-    files: set[Path] = set()
-    for root in roots or CODEX_ROOTS:
-        files.update(root.glob("**/rollout-*.jsonl"))
-    for path in sorted(files):
+    files = _files(roots, codex_roots(), "**/rollout-*.jsonl")
+    for path in files:
         lines = _read_lines(path)
-        cwd, subagent = _codex_session_meta(lines)
+        cwd, subagent = codex_session_meta(lines)
         if subagent:
             continue
         if cwd is not None and not _matches_project(cwd, project):
