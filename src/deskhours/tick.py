@@ -1,4 +1,4 @@
-"""One poll cycle: read idle → update slots → maybe remind."""
+"""One poll cycle: read the chosen signal → update slots → maybe remind."""
 
 from __future__ import annotations
 
@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from deskhours import platform
+from deskhours import platform, sources
 from deskhours.config import (
+    DEFAULT_SOURCE,
     IDLE_THRESHOLD_SEC,
-    NOTIFY_MESSAGE,
+    NOTIFY_MESSAGES,
     NOTIFY_THRESHOLD_H,
     NOTIFY_TITLE,
     SLOT_MINUTES,
@@ -21,15 +22,18 @@ from deskhours.state import load_state, save_state
 @dataclass(frozen=True)
 class TickResult:
     hours: float
-    idle_seconds: float
     active: bool
     notified: bool
     clock_hours: list[int]
+    source: str
+    detail: str
     state: DayState
 
 
 def run_tick(
     *,
+    source: str = DEFAULT_SOURCE,
+    project: str | None = None,
     idle_threshold: float = IDLE_THRESHOLD_SEC,
     slot_minutes: int = SLOT_MINUTES,
     notify_threshold: float = NOTIFY_THRESHOLD_H,
@@ -39,35 +43,44 @@ def run_tick(
     state_path: Path | None = None,
 ) -> TickResult:
     now = now or datetime.now()
-    idle = platform.idle_seconds()
-    active = idle < idle_threshold
+    reading = sources.read(
+        source,
+        now=now,
+        slot_minutes=slot_minutes,
+        idle_threshold=idle_threshold,
+        project=project,
+    )
 
-    state = load_state(state_path)
-    if active:
-        state.mark(now, slot_minutes)
+    state = load_state(state_path, source)
+    if reading.slots is None:
+        if reading.active:
+            state.mark(now, slot_minutes)
+    else:
+        state.slots = set(reading.slots)
 
     hours = state.hours(slot_minutes)
     notified = False
 
     if not dry_run:
-        save_state(state, state_path)
+        save_state(state, state_path, source)
         watermark = should_notify(hours, state.notified_hour, notify_threshold)
         if watermark is not None:
             platform.notify(
                 NOTIFY_TITLE,
-                NOTIFY_MESSAGE.format(hours=hours),
+                NOTIFY_MESSAGES[source].format(hours=hours),
                 dialog=dialog,
             )
             state.notified_hour = watermark
-            save_state(state, state_path)
+            save_state(state, state_path, source)
             notified = True
 
     return TickResult(
         hours=hours,
-        idle_seconds=idle,
-        active=active,
+        active=reading.active,
         notified=notified,
         clock_hours=state.active_clock_hours(),
+        source=source,
+        detail=reading.detail,
         state=state,
     )
 
@@ -76,6 +89,6 @@ def format_status(result: TickResult, *, slot_minutes: int, notify_threshold: fl
     label = "active" if result.active else "idle"
     hours = ", ".join(f"{h:02d}" for h in result.clock_hours) or "-"
     return (
-        f"Today: {result.hours:.1f}h  idle={result.idle_seconds:.0f}s ({label})  "
+        f"Today: {result.hours:.1f}h  [{result.source}] {result.detail} ({label})  "
         f"slot={slot_minutes}m  threshold={notify_threshold}h  hours=[{hours}]"
     )

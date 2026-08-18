@@ -7,6 +7,8 @@ import sys
 
 from deskhours import __version__, install
 from deskhours.config import (
+    ALL_SOURCES,
+    DEFAULT_SOURCE,
     IDLE_THRESHOLD_SEC,
     NOTIFY_THRESHOLD_H,
     SLOT_MINUTES,
@@ -17,6 +19,19 @@ from deskhours.tick import format_status, run_tick
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--source",
+        choices=ALL_SOURCES,
+        default=DEFAULT_SOURCE,
+        help=(
+            "what counts as working: keyboard and mouse activity (input) "
+            f"or prompts sent to coding agents (agents) (default: {DEFAULT_SOURCE})"
+        ),
+    )
+    parser.add_argument(
+        "--project",
+        help="with --source agents, count only sessions of projects matching this name",
+    )
+    parser.add_argument(
         "--threshold",
         type=float,
         default=NOTIFY_THRESHOLD_H,
@@ -26,7 +41,8 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
         "--idle-threshold",
         type=int,
         default=IDLE_THRESHOLD_SEC,
-        help=f"seconds without input before idle (default: {IDLE_THRESHOLD_SEC})",
+        help=f"seconds without input before idle, --source input only "
+        f"(default: {IDLE_THRESHOLD_SEC})",
     )
     parser.add_argument(
         "--slot",
@@ -44,13 +60,15 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 def cmd_tick(args: argparse.Namespace) -> int:
     try:
         result = run_tick(
+            source=args.source,
+            project=args.project,
             idle_threshold=args.idle_threshold,
             slot_minutes=args.slot,
             notify_threshold=args.threshold,
             dry_run=args.dry_run,
             dialog=args.dialog,
         )
-    except (UnsupportedPlatformError, RuntimeError, OSError) as exc:
+    except (UnsupportedPlatformError, RuntimeError, OSError, ValueError) as exc:
         print(f"deskhours: {exc}", file=sys.stderr)
         return 1
 
@@ -72,15 +90,17 @@ def cmd_install(args: argparse.Namespace) -> int:
             idle_threshold=args.idle_threshold,
             slot=args.slot,
             dialog=args.dialog,
+            source=args.source,
+            project=args.project,
         )
     except UnsupportedPlatformError as exc:
         print(f"deskhours: {exc}", file=sys.stderr)
         return 1
 
 
-def cmd_uninstall(_args: argparse.Namespace) -> int:
+def cmd_uninstall(args: argparse.Namespace) -> int:
     try:
-        return install.uninstall()
+        return install.uninstall(args.source)
     except UnsupportedPlatformError as exc:
         print(f"deskhours: {exc}", file=sys.stderr)
         return 1
@@ -89,7 +109,7 @@ def cmd_uninstall(_args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deskhours",
-        description="Count computer activity hours from keyboard/mouse idle state.",
+        description="Count working hours from keyboard and mouse activity, or from coding-agent prompts.",
     )
     parser.add_argument("--version", action="version", version=f"deskhours {__version__}")
     sub = parser.add_subparsers(dest="command")
@@ -118,6 +138,12 @@ def build_parser() -> argparse.ArgumentParser:
     install_p.set_defaults(func=cmd_install)
 
     uninstall_p = sub.add_parser("uninstall", help="remove background poller (macOS)")
+    uninstall_p.add_argument(
+        "--source",
+        choices=ALL_SOURCES,
+        default=DEFAULT_SOURCE,
+        help=f"which poller to remove (default: {DEFAULT_SOURCE})",
+    )
     uninstall_p.set_defaults(func=cmd_uninstall)
 
     return parser

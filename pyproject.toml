@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deskhours"
 version = "0.1.0"
-description = "Count time at your computer from real keyboard/mouse activity and remind you when the day gets long."
+description = "Count working hours from real keyboard/mouse activity or from coding-agent prompts, and remind you when the day gets long."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

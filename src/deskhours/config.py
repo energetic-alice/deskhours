@@ -8,5 +8,11 @@ POLL_INTERVAL_SEC = 300
 APP_NAME = "deskhours"
 LAUNCH_AGENT_LABEL = "com.deskhours"
 
+ALL_SOURCES = ("input", "agents")
+DEFAULT_SOURCE = "input"
+
 NOTIFY_TITLE = "Time to wrap up"
-NOTIFY_MESSAGE = "You have been active at your computer for {hours:.1f}h today."
+NOTIFY_MESSAGES = {
+    "input": "You have been active at your computer for {hours:.1f}h today.",
+    "agents": "You have been working with coding agents for {hours:.1f}h today.",
+}
