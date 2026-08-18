@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -253,6 +253,44 @@ def test_relocated_root_is_actually_read(monkeypatch, tmp_path):
     )
     _, per_harness = transcripts.collect_all(SLOT, harnesses=["claude"])
     assert per_harness["claude"][0] == 1
+
+
+def test_one_day_does_not_read_logs_written_before_it(monkeypatch, tmp_path):
+    """The poller runs every few minutes; without this it re-reads the whole history."""
+    monkeypatch.setenv("DESKHOURS_CLAUDE_ROOT", str(tmp_path))
+    today = date.today()
+    prompt = {
+        "type": "user",
+        "timestamp": f"{today.isoformat()}T09:04:00Z",
+        "message": {"content": "typed by a person"},
+    }
+    fresh = tmp_path / "proj" / "fresh.jsonl"
+    stale = tmp_path / "proj" / "stale.jsonl"
+    write_lines(fresh, [prompt])
+    write_lines(stale, [prompt])
+    long_ago = (datetime.now() - timedelta(days=10)).timestamp()
+    os.utime(stale, (long_ago, long_ago))
+
+    _, per_harness = transcripts.slots_for_day(today, harnesses=["claude"])
+
+    assert per_harness["claude"][0] == 1, "the stale file was read even though it cannot matter"
+
+
+def test_a_log_touched_today_is_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("DESKHOURS_CLAUDE_ROOT", str(tmp_path))
+    today = date.today()
+    write_lines(
+        tmp_path / "proj" / "s.jsonl",
+        [
+            {
+                "type": "user",
+                "timestamp": f"{today.isoformat()}T09:04:00Z",
+                "message": {"content": "typed by a person"},
+            }
+        ],
+    )
+    slots, _ = transcripts.slots_for_day(today, slot_minutes=30, harnesses=["claude"])
+    assert len(slots) == 1
 
 
 def test_unknown_harness_is_rejected():

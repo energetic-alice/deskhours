@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+
+  test:
+    # The three systems each have their own idle reader, notifier and scheduler, and the
+    # oldest and newest Python are the ends of the range the package promises to support.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest
+      - name: The command line answers on a machine with no harness and no history
+        # The agent count needs no desktop session, so it is the one that can run on a
+        # headless runner; the keyboard and mouse count needs a display to read idle time.
+        run: |
+          deskhours --version
+          deskhours sources
+          deskhours status --source agents

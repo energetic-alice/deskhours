@@ -8,7 +8,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from deskhours.config import APP_NAME, DEFAULT_SOURCE, LAUNCH_AGENT_LABEL, POLL_INTERVAL_SEC
+from deskhours.config import APP_NAME, LAUNCH_AGENT_LABEL, POLL_INTERVAL_SEC, Settings
 from deskhours.install import program_arguments
 from deskhours.state import default_state_path
 
@@ -45,30 +45,12 @@ def render_plist(program: list[str]) -> str:
 
 def _xml_escape(value: str) -> str:
     return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     )
 
 
-def install(
-    *,
-    threshold: float,
-    idle_threshold: int,
-    slot: int,
-    dialog: bool,
-    source: str = DEFAULT_SOURCE,
-    project: str | None = None,
-) -> int:
-    program = program_arguments(
-        threshold=threshold,
-        idle_threshold=idle_threshold,
-        slot=slot,
-        dialog=dialog,
-        source=source,
-        project=project,
-    )
+def install(settings: Settings) -> int:
+    program = program_arguments(settings)
     plist = render_plist(program)
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -83,8 +65,8 @@ def install(
         return result.returncode
 
     print(f"{'Replaced' if replaced else 'Installed'} LaunchAgent: {PLIST_PATH}")
-    print(f"Counting: {source}. Polls every {POLL_INTERVAL_SEC // 60} minutes.")
-    print(f"State file: {default_state_path(source)}")
+    print(f"Counting: {settings.source}. Polls every {POLL_INTERVAL_SEC // 60} minutes.")
+    print(f"State file: {default_state_path(settings.source)}")
     print("Using:", " ".join(program))
     return 0
 

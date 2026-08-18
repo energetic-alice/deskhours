@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Iterable
 
 from deskhours.config import NOTIFY_THRESHOLD_H, SLOT_MINUTES
 
@@ -38,6 +38,12 @@ def should_notify(
 
 @dataclass
 class DayState:
+    """Today's slots, as they are kept on disk.
+
+    The field is `day` rather than `date` so it does not shadow the date type inside this
+    module; the stored key stays `date` so an existing state file keeps working.
+    """
+
     day: str = field(default_factory=lambda: date.today().isoformat())
     slots: set[Slot] = field(default_factory=set)
     notified_hour: int = 0

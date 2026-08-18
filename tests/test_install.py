@@ -5,14 +5,13 @@ from __future__ import annotations
 import plistlib
 
 from deskhours import install
+from deskhours.config import Settings
 from deskhours.install import macos, windows
-
-COMMON = dict(threshold=8.0, idle_threshold=300, slot=30)
 
 
 def test_program_arguments_carry_the_source_and_project(monkeypatch):
     monkeypatch.setattr(install.shutil, "which", lambda _: "/opt/bin/deskhours")
-    args = install.program_arguments(**COMMON, dialog=False, source="agents", project="my api")
+    args = install.program_arguments(Settings(source="agents", project="my api"))
     assert args[:2] == ["/opt/bin/deskhours", "tick"]
     assert args[-4:] == ["--source", "agents", "--project", "my api"]
     assert "--dialog" not in args
@@ -21,7 +20,7 @@ def test_program_arguments_carry_the_source_and_project(monkeypatch):
 def test_program_arguments_fall_back_to_the_module(monkeypatch):
     """Without the console script on PATH the scheduler has to call the interpreter."""
     monkeypatch.setattr(install.shutil, "which", lambda _: None)
-    args = install.program_arguments(**COMMON, dialog=True)
+    args = install.program_arguments(Settings(dialog=True))
     assert args[1:4] == ["-m", "deskhours", "tick"]
     assert args[-1] == "--dialog"
 
@@ -70,5 +69,9 @@ def test_windows_poll_never_asks_for_zero_minutes():
 
 def test_delete_command_is_forced_so_it_does_not_prompt():
     assert windows.delete_command("deskhours") == [
-        "schtasks", "/Delete", "/TN", "deskhours", "/F",
+        "schtasks",
+        "/Delete",
+        "/TN",
+        "deskhours",
+        "/F",
     ]

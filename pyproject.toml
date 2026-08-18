@@ -22,6 +22,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
 [project.urls]
 Homepage = "https://github.com/energetic-alice/deskhours"
 Repository = "https://github.com/energetic-alice/deskhours"
@@ -32,3 +35,15 @@ deskhours = "deskhours.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RET"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

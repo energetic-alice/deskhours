@@ -6,8 +6,8 @@ import json
 from datetime import date, datetime
 
 from deskhours import platform, sources, tick
-from deskhours.state import default_state_path, save_state
 from deskhours.core import DayState
+from deskhours.state import default_state_path, save_state
 
 NOW = datetime(2026, 8, 18, 14, 4)
 TODAY = date(2026, 8, 18).isoformat()
@@ -65,7 +65,9 @@ def test_dry_run_writes_nothing(monkeypatch, tmp_path):
 
 def test_each_source_gets_its_own_wording(monkeypatch, tmp_path):
     sent = []
-    monkeypatch.setattr(platform, "notify", lambda title, message, dialog=False: sent.append(message))
+    monkeypatch.setattr(
+        platform, "notify", lambda title, message, dialog=False: sent.append(message)
+    )
     full_day = {(hour, half) for hour in range(9, 18) for half in (0, 1)}
 
     reading(monkeypatch, active=True, detail="idle=3s")

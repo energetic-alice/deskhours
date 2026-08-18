@@ -6,10 +6,9 @@ import getpass
 import subprocess
 import sys
 
-from deskhours.config import APP_NAME, DEFAULT_SOURCE, POLL_INTERVAL_SEC
+from deskhours.config import APP_NAME, POLL_INTERVAL_SEC, Settings
 from deskhours.install import program_arguments
 from deskhours.state import default_state_path
-
 
 TASK_NAME = APP_NAME
 
@@ -63,23 +62,8 @@ def query_command(name: str) -> list[str]:
     return ["schtasks", "/Query", "/TN", name]
 
 
-def install(
-    *,
-    threshold: float,
-    idle_threshold: int,
-    slot: int,
-    dialog: bool,
-    source: str = DEFAULT_SOURCE,
-    project: str | None = None,
-) -> int:
-    program = program_arguments(
-        threshold=threshold,
-        idle_threshold=idle_threshold,
-        slot=slot,
-        dialog=dialog,
-        source=source,
-        project=project,
-    )
+def install(settings: Settings) -> int:
+    program = program_arguments(settings)
     minutes = poll_minutes()
     command = create_command(program, TASK_NAME, minutes, getpass.getuser())
 
@@ -89,8 +73,8 @@ def install(
         return result.returncode
 
     print(f"Installed scheduled task: {TASK_NAME}")
-    print(f"Counting: {source}. Runs every {minutes} minutes.")
-    print(f"State file: {default_state_path(source)}")
+    print(f"Counting: {settings.source}. Runs every {minutes} minutes.")
+    print(f"State file: {default_state_path(settings.source)}")
     print("Using:", task_run_value(program))
     return 0
 

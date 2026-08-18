@@ -33,9 +33,9 @@ import json
 import os
 import re
 from collections import defaultdict
-from datetime import date, datetime
+from collections.abc import Iterable
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Iterable
 
 from deskhours.config import SLOT_MINUTES
 from deskhours.core import Slot, slot_at
@@ -132,6 +132,7 @@ def scan(directory: Path | str) -> dict[str, list[Path]]:
                 hits[harness].append(path)
             subdirs[:] = []
     return hits
+
 
 _CURSOR_TS = re.compile(
     r"<timestamp>[A-Za-z]+, ([A-Za-z]{3,9}) (\d{1,2}), (\d{4}), (\d{1,2}):(\d{2}) ([AP]M) \(UTC"
@@ -271,23 +272,48 @@ def codex_session_meta(lines: Iterable[str]) -> tuple[str | None, bool]:
     return cwd, subagent
 
 
-def _files(roots: Iterable[Path | str] | None, fallback: Iterable[Path], pattern: str) -> list[Path]:
+def _files(
+    roots: Iterable[Path | str] | None,
+    fallback: Iterable[Path],
+    pattern: str,
+    modified_after: datetime | None = None,
+) -> list[Path]:
     """Every file matching the pattern under any root, de-duplicated and ordered.
 
     A root that does not exist yields nothing rather than failing, which is what makes a
     machine with only one of the three harnesses installed work without configuration.
+
+    `modified_after` skips logs that were last written before that moment. Sessions are
+    appended to as they happen, so such a file cannot hold a prompt from a later day, and
+    a count for one day does not have to read years of history to find that out.
     """
+    cutoff = modified_after.timestamp() if modified_after else None
     found: set[Path] = set()
     for root in roots or fallback:
-        found.update(Path(root).glob(pattern))
+        for path in Path(root).glob(pattern):
+            if cutoff is not None:
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        continue
+                except OSError:
+                    continue
+            found.add(path)
     return sorted(found)
 
 
-def collect_cursor(days: dict, slot_minutes: int, roots: Iterable[Path | str] | None = None,
-                   project: str | None = None) -> int:
+def collect_cursor(
+    days: dict,
+    slot_minutes: int,
+    roots: Iterable[Path | str] | None = None,
+    project: str | None = None,
+    *,
+    modified_after: datetime | None = None,
+) -> int:
     """Cursor: pull the local-time wrapper straight out of each transcript."""
     prompts = 0
-    for path in _files(roots, harness_roots("cursor"), "*/agent-transcripts/*/*.jsonl"):
+    for path in _files(
+        roots, harness_roots("cursor"), "*/agent-transcripts/*/*.jsonl", modified_after
+    ):
         if not _matches_project(path.parts[-4], project):
             continue
         try:
@@ -304,11 +330,17 @@ def collect_cursor(days: dict, slot_minutes: int, roots: Iterable[Path | str] | 
     return prompts
 
 
-def collect_claude(days: dict, slot_minutes: int, roots: Iterable[Path | str] | None = None,
-                   project: str | None = None) -> int:
+def collect_claude(
+    days: dict,
+    slot_minutes: int,
+    roots: Iterable[Path | str] | None = None,
+    project: str | None = None,
+    *,
+    modified_after: datetime | None = None,
+) -> int:
     """Claude Code: per-line UTC timestamps, human turns only."""
     prompts = 0
-    for path in _files(roots, harness_roots("claude"), "*/*.jsonl"):
+    for path in _files(roots, harness_roots("claude"), "*/*.jsonl", modified_after):
         if not _matches_project(path.parent.name, project):
             continue
         for line in _read_lines(path):
@@ -322,11 +354,17 @@ def collect_claude(days: dict, slot_minutes: int, roots: Iterable[Path | str] | 
     return prompts
 
 
-def collect_codex(days: dict, slot_minutes: int, roots: Iterable[Path | str] | None = None,
-                  project: str | None = None) -> int:
+def collect_codex(
+    days: dict,
+    slot_minutes: int,
+    roots: Iterable[Path | str] | None = None,
+    project: str | None = None,
+    *,
+    modified_after: datetime | None = None,
+) -> int:
     """Codex: top-level user_message events, scoped by the session cwd."""
     prompts = 0
-    files = _files(roots, harness_roots("codex"), "**/rollout-*.jsonl")
+    files = _files(roots, harness_roots("codex"), "**/rollout-*.jsonl", modified_after)
     for path in files:
         lines = _read_lines(path)
         cwd, subagent = codex_session_meta(lines)
@@ -352,6 +390,7 @@ def collect_all(
     slot_minutes: int = SLOT_MINUTES,
     harnesses: Iterable[str] = ALL_HARNESSES,
     project: str | None = None,
+    modified_after: datetime | None = None,
 ) -> tuple[dict, dict[str, tuple[int, int]]]:
     """Merge every requested harness into one day-to-slot-set map.
 
@@ -367,7 +406,7 @@ def collect_all(
         except KeyError:
             raise ValueError(f"unknown harness: {name}") from None
         own: dict = defaultdict(set)
-        prompts = reader(own, slot_minutes, None, project)
+        prompts = reader(own, slot_minutes, None, project, modified_after=modified_after)
         per_harness[name] = (prompts, len(own))
         for day, slots in own.items():
             days[day] |= slots
@@ -380,6 +419,14 @@ def slots_for_day(
     harnesses: Iterable[str] = ALL_HARNESSES,
     project: str | None = None,
 ) -> tuple[set[Slot], dict[str, tuple[int, int]]]:
-    """Active slots for one local date, plus the per-harness prompt counts behind them."""
-    days, per_harness = collect_all(slot_minutes, harnesses, project)
-    return days.get(day or date.today(), set()), per_harness
+    """Active slots for one local date, plus the per-harness prompt counts behind them.
+
+    Only logs written on or after that date can hold its prompts, so the rest are skipped.
+    Without that, a poller running every few minutes would re-read every session ever
+    recorded, and the work would grow with the whole history instead of with the day. The
+    extra day of margin covers a machine whose clock or timezone disagrees slightly.
+    """
+    day = day or date.today()
+    cutoff = datetime.combine(day, datetime.min.time()) - timedelta(days=1)
+    days, per_harness = collect_all(slot_minutes, harnesses, project, modified_after=cutoff)
+    return days.get(day, set()), per_harness

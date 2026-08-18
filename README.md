@@ -1,6 +1,10 @@
 # deskhours
 
+[![CI](https://github.com/energetic-alice/deskhours/actions/workflows/ci.yml/badge.svg)](https://github.com/energetic-alice/deskhours/actions/workflows/ci.yml)
+
 Count **your working hours** and remind yourself when the day gets long. Two signals are available: real keyboard and mouse activity, or the prompts you sent to a coding agent.
+
+Python 3.9 or newer, no dependencies, macOS and Windows and Linux.
 
 ## How it works
 
@@ -44,9 +48,13 @@ deskhours sources --scan ~/Volumes/work   # only if a harness lives somewhere un
 
 Only turns a person typed count. Agent replies, tool output, injected reminders and subagent sessions are skipped, so a long unattended run or an overnight watcher does not become working hours.
 
+These session logs are an internal detail of each tool, not a published format, so a new version can change them. `deskhours sources` is how you notice: a harness that used to report prompts and now reports none has either gone unused or changed its layout.
+
 **Why look in a few places instead of searching the disk?** Because searching is both slower and less safe, which is easy to assume the other way round. Measured on one real machine: checking the candidate places took 0.1 ms and found all 3 installed harnesses, while walking the whole home directory took 4.3 seconds and returned a 4th match — a sandboxed agent session carrying its own nested `.claude/projects/` tree, same layout, same `subagents/` folder. Counting that would have credited an agent's own turns as time a person worked. A search has to know to throw such copies away before it is even correct, and on macOS it needs access to your entire disk to run. `--scan` does apply those exclusions, which is why it stays opt-in and prints what it found instead of counting it.
 
-All projects count by default. Narrow it with `--project`, which matches loosely: every harness spells the same project differently, so `--project "my api"` also finds the directory named `Users-me-Projects-My-API`.
+Every project counts, and none of them has to be configured: each harness keeps one directory per project under its own root, so ten projects are read the same way as one. Narrow it with `--project`, which matches loosely: every harness spells the same project differently, so `--project "my api"` also finds the directory named `Users-me-Projects-My-API`.
+
+A poll reads only the logs written since the day began, because a session file that has not been touched since yesterday cannot hold a prompt from today. The cost therefore follows how much you worked today, not how much history you have kept. Measured on one machine with 388 session logs holding 392 MB, that is 51 MB per poll instead of all of it, and it stays that way as the history grows.
 
 What it does *not* measure: thinking, reading, reviewing a diff, meetings, and any work you did without an agent.
 
@@ -151,9 +159,25 @@ deskhours uninstall
 ## Development
 
 ```bash
-pip install -e . pytest
+pip install -e ".[dev]"
 pytest
+ruff check src tests
+ruff format src tests
 ```
+
+No runtime dependencies, by design: each platform is reached through a tool it already ships with, so the only install step is the package itself. CI runs the tests on Linux, macOS and Windows against the oldest and newest supported Python, and checks that the command line answers on a machine with no session history at all.
+
+The layout follows the signals it reads:
+
+| Module | Holds |
+|---|---|
+| `core.py` | the counting rules, with no disk and no operating system |
+| `sources.py` | the two signals behind one interface |
+| `transcripts.py` | reading agent session logs, and finding where they live |
+| `tick.py` | one poll: read, update, maybe remind |
+| `state.py` | today's slots on disk |
+| `platform.py` | picks the backend for this system |
+| `idle/`, `notify/`, `install/` | one module per system, same name in each |
 
 ## Privacy
 
