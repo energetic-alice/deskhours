@@ -83,6 +83,26 @@ def cmd_tick(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sources(args: argparse.Namespace) -> int:
+    """Show where each harness is read from and what came back.
+
+    On a new machine this is the difference between trusting the number and knowing why a
+    harness contributed nothing: not installed, moved, or simply unused that day.
+    """
+    from deskhours import transcripts
+
+    _, per_harness = transcripts.collect_all(slot_minutes=args.slot, project=args.project)
+    for harness, roots in transcripts.all_roots().items():
+        prompts, day_count = per_harness[harness]
+        note = "" if prompts else "   <- nothing found"
+        print(f"{harness:<7} {prompts:>6} prompts  {day_count:>4} days{note}")
+        for root in roots:
+            print(f"        {'ok     ' if root.is_dir() else 'missing'}  {root}")
+    print("\nOverride a relocated harness with DESKHOURS_CURSOR_ROOT, DESKHOURS_CLAUDE_ROOT")
+    print("or DESKHOURS_CODEX_ROOTS (several paths joined by the platform path separator).")
+    return 0
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     try:
         return install.install(
@@ -98,9 +118,9 @@ def cmd_install(args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_uninstall(args: argparse.Namespace) -> int:
+def cmd_uninstall(_args: argparse.Namespace) -> int:
     try:
-        return install.uninstall(args.source)
+        return install.uninstall()
     except UnsupportedPlatformError as exc:
         print(f"deskhours: {exc}", file=sys.stderr)
         return 1
@@ -133,17 +153,28 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(status)
     status.set_defaults(func=cmd_tick, dry_run=True, verbose=False)
 
-    install_p = sub.add_parser("install", help="install background poller (macOS)")
+    sources_p = sub.add_parser(
+        "sources", help="show which transcript directories are found on this machine"
+    )
+    sources_p.add_argument(
+        "--project",
+        help="count only sessions of projects matching this name",
+    )
+    sources_p.add_argument(
+        "--slot",
+        type=int,
+        default=SLOT_MINUTES,
+        help=f"slot size in minutes (default: {SLOT_MINUTES})",
+    )
+    sources_p.set_defaults(func=cmd_sources)
+
+    install_p = sub.add_parser(
+        "install", help="install background poller (macOS LaunchAgent, Windows Task Scheduler)"
+    )
     _add_common(install_p)
     install_p.set_defaults(func=cmd_install)
 
-    uninstall_p = sub.add_parser("uninstall", help="remove background poller (macOS)")
-    uninstall_p.add_argument(
-        "--source",
-        choices=ALL_SOURCES,
-        default=DEFAULT_SOURCE,
-        help=f"which poller to remove (default: {DEFAULT_SOURCE})",
-    )
+    uninstall_p = sub.add_parser("uninstall", help="remove background poller")
     uninstall_p.set_defaults(func=cmd_uninstall)
 
     return parser

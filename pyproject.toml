@@ -8,14 +8,12 @@ version = "0.1.0"
 description = "Count working hours from real keyboard/mouse activity or from coding-agent prompts, and remind you when the day gets long."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
 authors = [{ name = "Alisa Tsvetkova" }]
 keywords = ["productivity", "worktime", "idle", "reminder", "desktop"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: End Users/Desktop",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: MacOS",
   "Operating System :: Microsoft :: Windows",
   "Operating System :: POSIX :: Linux",
