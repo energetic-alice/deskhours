@@ -25,25 +25,26 @@ What it does *not* measure:
 
 Prompts you sent to a coding agent. deskhours reads the session logs that Cursor, Claude Code and Codex already keep on your machine, and counts a slot when it holds at least one prompt you typed:
 
-| Harness | Where the sessions live | Override |
+| Harness | Layout it looks for | Override |
 |---|---|---|
-| Cursor | `~/.cursor/projects/*/agent-transcripts/` | `DESKHOURS_CURSOR_ROOT` |
-| Claude Code | `~/.claude/projects/` | `DESKHOURS_CLAUDE_ROOT` |
-| Codex | `~/.codex/sessions/` and `~/.codex/archived_sessions/` | `DESKHOURS_CODEX_ROOTS` |
+| Cursor | `.cursor/projects/*/agent-transcripts/` | `DESKHOURS_CURSOR_ROOT` |
+| Claude Code | `.claude/projects/` | `DESKHOURS_CLAUDE_ROOT` |
+| Codex | `.codex/sessions/` and `.codex/archived_sessions/` | `DESKHOURS_CODEX_ROOTS` |
 
-Nothing needs configuring on a normal machine: projects are discovered from whatever directories a harness has created, a harness you do not use contributes nothing, and a missing directory is not an error. Set an override only if a harness lives somewhere else; several paths join with the platform path separator (`:`, or `;` on Windows).
+Nothing needs configuring. Those layouts are looked for under the few places the three operating systems keep user data — your home directory, `~/Library/Application Support`, `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME`, `%APPDATA%`, `%LOCALAPPDATA%` — and the projects inside come from whatever directories the harness itself created. A harness you do not use contributes nothing, and a directory that is not there is not an error.
 
 To see what your machine actually offers:
 
 ```bash
 deskhours sources
+deskhours sources --scan ~/Volumes/work   # only if a harness lives somewhere unusual
 ```
 
-It prints each directory, whether it exists, and how many prompts and days came from it — so a harness that contributes nothing is visibly missing rather than silently absent.
+`sources` prints each directory, whether it exists, and how many prompts and days came from it, so a harness that contributes nothing is visibly missing rather than silently absent. If yours lives somewhere the list above does not cover, `--scan` searches a directory you name, and an override then points at it for good (several paths join with the platform path separator: `:`, or `;` on Windows).
 
 Only turns a person typed count. Agent replies, tool output, injected reminders and subagent sessions are skipped, so a long unattended run or an overnight watcher does not become working hours.
 
-**Why not search the disk for transcripts?** Because a match is not proof. A sandboxed agent session can carry its own nested `.claude/projects/` tree, with the same layout and the same `subagents/` folder, and counting it would credit an agent's own turns as your working time. Scanning for the file pattern also finds JSONL datasets, captured CLI output and cached tool logs — on one real machine, 52 stray `.jsonl` files against 435 genuine ones. Known locations plus an override stay honest; `deskhours sources` makes the result checkable.
+**Why look in a few places instead of searching the disk?** Because searching is both slower and less safe, which is easy to assume the other way round. Measured on one real machine: checking the candidate places took 0.1 ms and found all 3 installed harnesses, while walking the whole home directory took 4.3 seconds and returned a 4th match — a sandboxed agent session carrying its own nested `.claude/projects/` tree, same layout, same `subagents/` folder. Counting that would have credited an agent's own turns as time a person worked. A search has to know to throw such copies away before it is even correct, and on macOS it needs access to your entire disk to run. `--scan` does apply those exclusions, which is why it stays opt-in and prints what it found instead of counting it.
 
 All projects count by default. Narrow it with `--project`, which matches loosely: every harness spells the same project differently, so `--project "my api"` also finds the directory named `Users-me-Projects-My-API`.
 

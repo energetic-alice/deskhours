@@ -98,8 +98,19 @@ def cmd_sources(args: argparse.Namespace) -> int:
         print(f"{harness:<7} {prompts:>6} prompts  {day_count:>4} days{note}")
         for root in roots:
             print(f"        {'ok     ' if root.is_dir() else 'missing'}  {root}")
-    print("\nOverride a relocated harness with DESKHOURS_CURSOR_ROOT, DESKHOURS_CLAUDE_ROOT")
-    print("or DESKHOURS_CODEX_ROOTS (several paths joined by the platform path separator).")
+
+    if args.scan:
+        print(f"\nSearching {args.scan} for other installs. This can take a while.")
+        for harness, found in transcripts.scan(args.scan).items():
+            for path in found:
+                print(f"        found    {path}  ({harness})")
+        print("Copies inside a sandboxed agent session are left out on purpose.")
+        print(f"To use one of these, set {' or '.join(transcripts.ENV_OVERRIDES.values())}.")
+        return 0
+
+    print("\nLooked under:", ", ".join(str(p) for p in transcripts.candidate_parents()))
+    print("A harness kept somewhere else can be pointed at with DESKHOURS_CURSOR_ROOT,")
+    print("DESKHOURS_CLAUDE_ROOT or DESKHOURS_CODEX_ROOTS, or searched for with --scan DIR.")
     return 0
 
 
@@ -165,6 +176,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=SLOT_MINUTES,
         help=f"slot size in minutes (default: {SLOT_MINUTES})",
+    )
+    sources_p.add_argument(
+        "--scan",
+        metavar="DIR",
+        help="also search this directory tree for a harness kept somewhere unusual",
     )
     sources_p.set_defaults(func=cmd_sources)
 

@@ -19,11 +19,12 @@ Counting rule: a slot counts as active when it holds at least one HUMAN prompt. 
 agent-side lines instead would turn a long unattended run or an overnight monitor into
 active time.
 
-Projects are discovered, not configured: whatever directories a harness has created are
-read. Only the harness root itself is fixed, and an environment variable moves it when a
-harness has been relocated. Searching the disk for transcripts instead would be worse than
-it sounds — a sandboxed agent session can hold a nested copy of the very same layout, and
-counting that would credit an agent's own turns as time a person spent working.
+Nothing is configured by hand. Projects come from whatever directories a harness has
+created, and the harness root itself is looked for under the few places the three operating
+systems keep user data. Searching the whole disk instead answers the same question
+thousands of times slower, needs access to every file on macOS, and is not even safe: a
+sandboxed agent session can hold a nested copy of the very same layout, so counting what
+turns up would credit an agent's own turns as time a person spent working.
 """
 
 from __future__ import annotations
@@ -41,41 +42,96 @@ from deskhours.core import Slot, slot_at
 
 ALL_HARNESSES = ("cursor", "claude", "codex")
 
+_LAYOUT = {
+    "cursor": (".cursor/projects",),
+    "claude": (".claude/projects",),
+    "codex": (".codex/sessions", ".codex/archived_sessions"),
+}
+ENV_OVERRIDES = {
+    "cursor": "DESKHOURS_CURSOR_ROOT",
+    "claude": "DESKHOURS_CLAUDE_ROOT",
+    "codex": "DESKHOURS_CODEX_ROOTS",
+}
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
-def _from_env(name: str, *default: Path) -> tuple[Path, ...]:
-    """Read the roots for one harness, allowing an override in the environment.
 
-    Several paths are joined the way the platform joins PATH, so one variable can carry
-    the live and archived directories a harness keeps apart.
+def candidate_parents() -> tuple[Path, ...]:
+    """The few places a harness keeps user data, across the three operating systems.
+
+    Checking a short list costs a handful of directory tests, which is cheap enough to
+    repeat on every poll. Walking the disk to answer the same question is thousands of
+    times slower and, on macOS, needs access to the whole disk to even try.
     """
-    raw = os.environ.get(name)
-    if not raw:
-        return default
-    return tuple(Path(part).expanduser() for part in raw.split(os.pathsep) if part)
+    home = Path.home()
+    parents = [
+        home,
+        home / "Library" / "Application Support",
+        home / ".config",
+        home / ".local" / "share",
+    ]
+    for variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
+        value = os.environ.get(variable)
+        if value:
+            parents.append(Path(value))
+    return tuple(dict.fromkeys(parents))
 
 
-def cursor_roots() -> tuple[Path, ...]:
-    return _from_env("DESKHOURS_CURSOR_ROOT", Path.home() / ".cursor" / "projects")
+def harness_roots(harness: str) -> tuple[Path, ...]:
+    """Where this harness keeps its sessions on this machine.
 
+    An override in the environment wins outright. Otherwise the layout is looked for under
+    each candidate parent, so nothing needs configuring after a normal install. When the
+    harness is absent the conventional path is still returned, so a report can name what
+    it looked for instead of staying silent.
+    """
+    if harness not in _LAYOUT:
+        raise ValueError(f"unknown harness: {harness}")
 
-def claude_roots() -> tuple[Path, ...]:
-    return _from_env("DESKHOURS_CLAUDE_ROOT", Path.home() / ".claude" / "projects")
+    override = os.environ.get(ENV_OVERRIDES[harness])
+    if override:
+        return tuple(Path(part).expanduser() for part in override.split(os.pathsep) if part)
 
-
-def codex_roots() -> tuple[Path, ...]:
-    return _from_env(
-        "DESKHOURS_CODEX_ROOTS",
-        Path.home() / ".codex" / "sessions",
-        Path.home() / ".codex" / "archived_sessions",
-    )
+    found: list[Path] = []
+    for parent in candidate_parents():
+        for relative in _LAYOUT[harness]:
+            candidate = parent.joinpath(*relative.split("/"))
+            if candidate.is_dir() and candidate not in found:
+                found.append(candidate)
+    if found:
+        return tuple(found)
+    return tuple(Path.home().joinpath(*r.split("/")) for r in _LAYOUT[harness])
 
 
 def all_roots() -> dict[str, tuple[Path, ...]]:
-    return {
-        "cursor": cursor_roots(),
-        "claude": claude_roots(),
-        "codex": codex_roots(),
+    return {harness: harness_roots(harness) for harness in ALL_HARNESSES}
+
+
+def scan(directory: Path | str) -> dict[str, list[Path]]:
+    """Search a directory tree for harness layouts, for the rare relocated install.
+
+    Two kinds of match are thrown away. A copy sitting under a directory named like a
+    session id belongs to a sandboxed agent run: it has the same layout and the same file
+    names, and counting it would read an agent's own turns as time a person worked. A
+    match nested inside another match is the same story one level down.
+    """
+    directory = Path(directory).expanduser()
+    marker_owner = {
+        tuple(relative.split("/")): harness
+        for harness, relatives in _LAYOUT.items()
+        for relative in relatives
     }
+    marker_names = {marker[0] for marker in marker_owner}
+    hits: dict[str, list[Path]] = {harness: [] for harness in ALL_HARNESSES}
+    for current, subdirs, _ in os.walk(directory, onerror=lambda _: None):
+        path = Path(current)
+        for marker, harness in marker_owner.items():
+            if path.parts[-len(marker) :] != marker:
+                continue
+            above = str(path.parents[len(marker) - 1])
+            if not _UUID.search(above) and not any(name in above for name in marker_names):
+                hits[harness].append(path)
+            subdirs[:] = []
+    return hits
 
 _CURSOR_TS = re.compile(
     r"<timestamp>[A-Za-z]+, ([A-Za-z]{3,9}) (\d{1,2}), (\d{4}), (\d{1,2}):(\d{2}) ([AP]M) \(UTC"
@@ -231,7 +287,7 @@ def collect_cursor(days: dict, slot_minutes: int, roots: Iterable[Path | str] | 
                    project: str | None = None) -> int:
     """Cursor: pull the local-time wrapper straight out of each transcript."""
     prompts = 0
-    for path in _files(roots, cursor_roots(), "*/agent-transcripts/*/*.jsonl"):
+    for path in _files(roots, harness_roots("cursor"), "*/agent-transcripts/*/*.jsonl"):
         if not _matches_project(path.parts[-4], project):
             continue
         try:
@@ -252,7 +308,7 @@ def collect_claude(days: dict, slot_minutes: int, roots: Iterable[Path | str] | 
                    project: str | None = None) -> int:
     """Claude Code: per-line UTC timestamps, human turns only."""
     prompts = 0
-    for path in _files(roots, claude_roots(), "*/*.jsonl"):
+    for path in _files(roots, harness_roots("claude"), "*/*.jsonl"):
         if not _matches_project(path.parent.name, project):
             continue
         for line in _read_lines(path):
@@ -270,7 +326,7 @@ def collect_codex(days: dict, slot_minutes: int, roots: Iterable[Path | str] | N
                   project: str | None = None) -> int:
     """Codex: top-level user_message events, scoped by the session cwd."""
     prompts = 0
-    files = _files(roots, codex_roots(), "**/rollout-*.jsonl")
+    files = _files(roots, harness_roots("codex"), "**/rollout-*.jsonl")
     for path in files:
         lines = _read_lines(path)
         cwd, subagent = codex_session_meta(lines)

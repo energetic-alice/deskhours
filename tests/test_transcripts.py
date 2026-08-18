@@ -160,24 +160,83 @@ def test_a_machine_without_that_harness_reports_zero(tmp_path):
     assert transcripts.collect_codex(days(), SLOT, roots=[missing]) == 0
 
 
-def test_roots_default_to_the_home_directory(monkeypatch):
-    monkeypatch.delenv("DESKHOURS_CURSOR_ROOT", raising=False)
-    monkeypatch.delenv("DESKHOURS_CLAUDE_ROOT", raising=False)
-    monkeypatch.delenv("DESKHOURS_CODEX_ROOTS", raising=False)
-    roots = transcripts.all_roots()
-    assert roots["cursor"] == (Path.home() / ".cursor" / "projects",)
-    assert roots["claude"] == (Path.home() / ".claude" / "projects",)
-    assert len(roots["codex"]) == 2
+@pytest.fixture
+def fake_home(monkeypatch, tmp_path):
+    """A machine of our own, with no overrides set."""
+    for variable in transcripts.ENV_OVERRIDES.values():
+        monkeypatch.delenv(variable, raising=False)
+    for variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    return tmp_path
 
 
-def test_environment_moves_a_relocated_harness(monkeypatch, tmp_path):
-    """A harness pointed somewhere else is the case a disk search is often reached for."""
-    monkeypatch.setenv("DESKHOURS_CLAUDE_ROOT", str(tmp_path / "elsewhere"))
+def test_an_installed_harness_is_found_without_configuration(fake_home):
+    (fake_home / ".claude" / "projects").mkdir(parents=True)
+    (fake_home / ".codex" / "sessions").mkdir(parents=True)
+    assert transcripts.harness_roots("claude") == (fake_home / ".claude" / "projects",)
+    assert transcripts.harness_roots("codex") == (fake_home / ".codex" / "sessions",)
+
+
+def test_a_harness_under_the_application_support_folder_is_found(fake_home):
+    """Same layout, different parent: found by looking, not by hardcoding one path."""
+    moved = fake_home / "Library" / "Application Support" / ".cursor" / "projects"
+    moved.mkdir(parents=True)
+    assert transcripts.harness_roots("cursor") == (moved,)
+
+
+def test_a_missing_harness_still_names_what_was_looked_for(fake_home):
+    """A report that says nothing is worse than one that says where it looked."""
+    assert transcripts.harness_roots("claude") == (fake_home / ".claude" / "projects",)
+
+
+def test_an_override_wins_over_what_was_found(fake_home):
+    (fake_home / ".claude" / "projects").mkdir(parents=True)
+    os.environ["DESKHOURS_CLAUDE_ROOT"] = str(fake_home / "elsewhere")
+    try:
+        assert transcripts.harness_roots("claude") == (fake_home / "elsewhere",)
+    finally:
+        del os.environ["DESKHOURS_CLAUDE_ROOT"]
+
+
+def test_an_override_carries_several_paths(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "DESKHOURS_CODEX_ROOTS", os.pathsep.join([str(tmp_path / "live"), str(tmp_path / "old")])
     )
-    assert transcripts.claude_roots() == (tmp_path / "elsewhere",)
-    assert transcripts.codex_roots() == (tmp_path / "live", tmp_path / "old")
+    assert transcripts.harness_roots("codex") == (tmp_path / "live", tmp_path / "old")
+
+
+def test_scan_finds_a_relocated_harness(tmp_path):
+    real = tmp_path / "Volumes" / "work" / ".claude" / "projects"
+    real.mkdir(parents=True)
+    assert transcripts.scan(tmp_path)["claude"] == [real]
+
+
+def test_scan_leaves_out_a_sandboxed_agent_copy(tmp_path):
+    """The nested copy has the same layout; only its ancestors give it away."""
+    real = tmp_path / ".claude" / "projects"
+    real.mkdir(parents=True)
+    sandbox = (
+        tmp_path
+        / "Application Support"
+        / "local-agent-mode-sessions"
+        / "c1f81119-eb22-4720-aede-b129cea3724a"
+        / "local_17b9019f-b2e3-4470-98b1-0339ddd23e28"
+        / ".claude"
+        / "projects"
+    )
+    sandbox.mkdir(parents=True)
+    found = transcripts.scan(tmp_path)["claude"]
+    assert found == [real]
+    assert sandbox not in found
+
+
+def test_scan_leaves_out_a_copy_inside_another_harness(tmp_path):
+    real = tmp_path / ".cursor" / "projects"
+    real.mkdir(parents=True)
+    (real / "some-project" / ".cursor" / "projects").mkdir(parents=True)
+    assert transcripts.scan(tmp_path)["cursor"] == [real]
 
 
 def test_relocated_root_is_actually_read(monkeypatch, tmp_path):
