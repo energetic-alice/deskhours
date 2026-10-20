@@ -29,7 +29,9 @@ def default_state_path(source: str = DEFAULT_SOURCE) -> Path:
     return _state_dir() / name
 
 
-def load_state(path: Path | None = None, source: str = DEFAULT_SOURCE) -> DayState:
+def load_state(
+    path: Path | None = None, source: str = DEFAULT_SOURCE, *, today: str | None = None
+) -> DayState:
     path = path or default_state_path(source)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -37,7 +39,7 @@ def load_state(path: Path | None = None, source: str = DEFAULT_SOURCE) -> DaySta
         data = {}
     if not isinstance(data, dict):
         data = {}
-    return DayState.from_dict(data)
+    return DayState.from_dict(data, today=today)
 
 
 def save_state(state: DayState, path: Path | None = None, source: str = DEFAULT_SOURCE) -> None:

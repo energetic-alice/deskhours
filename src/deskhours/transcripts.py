@@ -254,7 +254,8 @@ def claude_human_text(obj: dict) -> str | None:
     return text
 
 
-# Items Codex files as user input that nobody typed: a forked agent's inherited history and an answer picked in a question widget.
+# Codex records inherited subagent history and question-widget answers as user
+# input even though nobody typed them as a new prompt.
 _CODEX_SYNTHETIC_PREFIXES = (
     "The following is the Codex agent history",
     "<send_user_message_question_reply>",
@@ -263,13 +264,16 @@ _CODEX_SYNTHETIC_PREFIXES = (
     "<environment_context>",
     "# AGENTS.md instructions",
 )
-_CODEX_BROWSER_CONTEXT = re.compile(r"<in-app-browser-context.*?</in-app-browser-context>", re.DOTALL)
+_CODEX_BROWSER_CONTEXT = re.compile(
+    r"<in-app-browser-context.*?</in-app-browser-context>", re.DOTALL
+)
 
 
 def codex_prompt_text(obj: dict) -> str | None:
     """The text of a Codex prompt a person typed, or None.
 
-    The in-app browser attaches its tab state to a typed prompt, so that block is removed and the rest is kept.
+    The in-app browser attaches its tab state to a typed prompt. Remove that
+    block and keep the actual prompt.
     """
     if obj.get("type") != "event_msg":
         return None
@@ -292,7 +296,7 @@ def codex_prompt_text(obj: dict) -> str | None:
 
 
 def codex_prompts(lines: Iterable[str]) -> list[tuple[str, str]]:
-    """(timestamp, text) of each typed prompt in one session, once even when both formats record it."""
+    """Return each typed prompt once, even when both event formats record it."""
     seen: set[tuple[str, str]] = set()
     prompts = []
     for line in lines:
@@ -303,7 +307,8 @@ def codex_prompts(lines: Iterable[str]) -> list[tuple[str, str]]:
         timestamp = obj.get("timestamp")
         if text is None or not isinstance(timestamp, str):
             continue
-        # Both formats of one prompt are written milliseconds apart, so the minute and the text identify it.
+        # Both formats are written milliseconds apart; minute and text identify
+        # the same prompt.
         key = (timestamp[:16], " ".join(text.split()))
         if key in seen:
             continue

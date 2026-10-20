@@ -51,7 +51,7 @@ def run_tick(
         project=project,
     )
 
-    state = load_state(state_path, source)
+    state = load_state(state_path, source, today=now.date().isoformat())
     if reading.slots is None:
         if reading.active:
             state.mark(now, slot_minutes)

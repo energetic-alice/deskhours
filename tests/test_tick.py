@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from deskhours import platform, sources, tick
 from deskhours.core import DayState
@@ -86,3 +86,17 @@ def test_state_files_do_not_collide():
     assert default_state_path("input").name == "state.json"
     assert default_state_path("agents").name == "state-agents.json"
     assert default_state_path("input").parent == default_state_path("agents").parent
+
+
+def test_tick_rolls_state_to_the_requested_day(monkeypatch, tmp_path):
+    state_file = tmp_path / "input.json"
+    seed(state_file, [(9, 0)], notified_hour=8)
+    reading(monkeypatch, active=False, detail="idle=900s")
+    next_day = NOW + timedelta(days=1)
+
+    result = tick.run_tick(source="input", now=next_day, state_path=state_file)
+
+    assert result.state.day == next_day.date().isoformat()
+    assert result.state.slots == set()
+    assert result.state.notified_hour == 0
+    assert json.loads(state_file.read_text())["date"] == next_day.date().isoformat()

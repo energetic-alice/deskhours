@@ -183,10 +183,10 @@ def test_codex_counts_one_prompt_once_when_both_formats_record_it(tmp_path):
         "The following is the Codex agent history whose request action you are assisting with.",
         '<send_user_message_question_reply>\n[{"question": "q", "answer": "a"}]',
         '<in-app-browser-context source="ambient-ui-state">tab state</in-app-browser-context>',
-        '<heartbeat>scheduled background task</heartbeat>',
+        "<heartbeat>scheduled background task</heartbeat>",
         '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>',
-        '<environment_context>injected session data</environment_context>',
-        '# AGENTS.md instructions for /home/dev/project',
+        "<environment_context>injected session data</environment_context>",
+        "# AGENTS.md instructions for /home/dev/project",
     ],
 )
 @pytest.mark.parametrize("event_format", ["item", "legacy"])
@@ -209,8 +209,14 @@ def test_codex_ignores_items_nobody_typed(tmp_path, text, event_format):
 
 
 def test_codex_keeps_a_prompt_typed_next_to_browser_context(tmp_path):
-    text = '<in-app-browser-context source="ambient-ui-state">tab</in-app-browser-context>\nwhy is this red?'
-    assert transcripts.codex_prompt_text(codex_item("2026-09-07T09:04:00Z", text)) == "why is this red?"
+    text = (
+        '<in-app-browser-context source="ambient-ui-state">tab</in-app-browser-context>'
+        "\nwhy is this red?"
+    )
+    assert (
+        transcripts.codex_prompt_text(codex_item("2026-09-07T09:04:00Z", text))
+        == "why is this red?"
+    )
 
 
 def test_roots_may_be_plain_strings(tmp_path):
