@@ -135,6 +135,72 @@ def test_codex_skips_subagent_sessions_and_scopes_by_cwd(tmp_path):
     assert transcripts.collect_codex(days(), SLOT, roots=[tmp_path], project="mobile") == 0
 
 
+def codex_item(timestamp, text):
+    """A prompt in the format Codex writes now: a completed UserMessage item."""
+    return {
+        "type": "event_msg",
+        "timestamp": timestamp,
+        "payload": {
+            "type": "item_completed",
+            "item": {"type": "UserMessage", "content": [{"type": "text", "text": text}]},
+        },
+    }
+
+
+def test_codex_reads_prompts_written_as_completed_user_message_items(tmp_path):
+    write_lines(
+        tmp_path / "2026" / "09" / "07" / "rollout-a.jsonl",
+        [
+            {"type": "session_meta", "payload": {"cwd": "/home/dev/web-api"}},
+            codex_item("2026-09-07T09:04:00Z", "check the rollout"),
+            codex_item("2026-09-07T11:10:00Z", "now fix it"),
+        ],
+    )
+    found = days()
+    assert transcripts.collect_codex(found, SLOT, roots=[tmp_path]) == 2
+    assert sum(len(slots) for slots in found.values()) == 2
+
+
+def test_codex_counts_one_prompt_once_when_both_formats_record_it(tmp_path):
+    write_lines(
+        tmp_path / "2026" / "10" / "05" / "rollout-a.jsonl",
+        [
+            {"type": "session_meta", "payload": {"cwd": "/home/dev/web-api"}},
+            {
+                "type": "event_msg",
+                "timestamp": "2026-10-05T13:16:23.069Z",
+                "payload": {"type": "user_message", "message": "continue 1529\n"},
+            },
+            codex_item("2026-10-05T13:16:23.118Z", "continue 1529\n"),
+        ],
+    )
+    assert transcripts.collect_codex(days(), SLOT, roots=[tmp_path]) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The following is the Codex agent history whose request action you are assisting with.",
+        '<send_user_message_question_reply>\n[{"question": "q", "answer": "a"}]',
+        '<in-app-browser-context source="ambient-ui-state">tab state</in-app-browser-context>',
+    ],
+)
+def test_codex_ignores_items_nobody_typed(tmp_path, text):
+    write_lines(
+        tmp_path / "2026" / "09" / "07" / "rollout-a.jsonl",
+        [
+            {"type": "session_meta", "payload": {"cwd": "/home/dev/web-api"}},
+            codex_item("2026-09-07T09:04:00Z", text),
+        ],
+    )
+    assert transcripts.collect_codex(days(), SLOT, roots=[tmp_path]) == 0
+
+
+def test_codex_keeps_a_prompt_typed_next_to_browser_context(tmp_path):
+    text = '<in-app-browser-context source="ambient-ui-state">tab</in-app-browser-context>\nwhy is this red?'
+    assert transcripts.codex_prompt_text(codex_item("2026-09-07T09:04:00Z", text)) == "why is this red?"
+
+
 def test_roots_may_be_plain_strings(tmp_path):
     """Callers outside the package pass paths as strings."""
     write_lines(

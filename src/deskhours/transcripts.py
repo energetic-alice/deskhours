@@ -11,7 +11,8 @@ Three agent harnesses keep a session log on disk, each with its own layout:
           file also holds assistant turns, tool results and background monitor events.
 
   codex   ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl and ~/.codex/archived_sessions/
-          Human prompts are event_msg lines whose payload type is "user_message".
+          Human prompts are event_msg lines: a completed "UserMessage" item in the current
+          format, a "user_message" event in the older one, and sometimes both for one prompt.
           Codex files sessions by date rather than by project, so the project a session
           belongs to is only available from the cwd in its session_meta line.
 
@@ -253,6 +254,60 @@ def claude_human_text(obj: dict) -> str | None:
     return text
 
 
+# Items Codex files as user input that nobody typed: a forked agent's inherited history and an answer picked in a question widget.
+_CODEX_SYNTHETIC_PREFIXES = (
+    "The following is the Codex agent history",
+    "<send_user_message_question_reply>",
+)
+_CODEX_BROWSER_CONTEXT = re.compile(r"<in-app-browser-context.*?</in-app-browser-context>", re.DOTALL)
+
+
+def codex_prompt_text(obj: dict) -> str | None:
+    """The text of a Codex prompt a person typed, or None.
+
+    The in-app browser attaches its tab state to a typed prompt, so that block is removed and the rest is kept.
+    """
+    if obj.get("type") != "event_msg":
+        return None
+    payload = obj.get("payload") or {}
+    item = payload.get("item") or {}
+    if payload.get("type") == "user_message":
+        text = payload.get("message")
+    elif payload.get("type") == "item_completed" and item.get("type") == "UserMessage":
+        text = "\n".join(
+            part.get("text", "") for part in item.get("content") or [] if isinstance(part, dict)
+        )
+    else:
+        return None
+    if not isinstance(text, str):
+        return None
+    text = _CODEX_BROWSER_CONTEXT.sub("", text).strip()
+    if not text or text.startswith(_CODEX_SYNTHETIC_PREFIXES):
+        return None
+    return text
+
+
+def codex_prompts(lines: Iterable[str]) -> list[tuple[str, str]]:
+    """(timestamp, text) of each typed prompt in one session, once even when both formats record it."""
+    seen: set[tuple[str, str]] = set()
+    prompts = []
+    for line in lines:
+        obj = _loads(line)
+        if obj is None:
+            continue
+        text = codex_prompt_text(obj)
+        timestamp = obj.get("timestamp")
+        if text is None or not isinstance(timestamp, str):
+            continue
+        # Both formats of one prompt are written milliseconds apart, so the minute and the text identify it.
+        key = (timestamp[:16], " ".join(text.split()))
+        if key in seen:
+            continue
+        seen.add(key)
+        prompts.append((timestamp, text))
+    return prompts
+
+
 def codex_session_meta(lines: Iterable[str]) -> tuple[str | None, bool]:
     """Return the session cwd and whether the session belongs to a subagent."""
     cwd: str | None = None
@@ -362,7 +417,7 @@ def collect_codex(
     *,
     modified_after: datetime | None = None,
 ) -> int:
-    """Codex: top-level user_message events, scoped by the session cwd."""
+    """Codex: typed prompts of top-level sessions, scoped by the session cwd."""
     prompts = 0
     files = _files(roots, harness_roots("codex"), "**/rollout-*.jsonl", modified_after)
     for path in files:
@@ -372,14 +427,8 @@ def collect_codex(
             continue
         if cwd is not None and not _matches_project(cwd, project):
             continue
-        for line in lines:
-            obj = _loads(line)
-            if obj is None or obj.get("type") != "event_msg":
-                continue
-            payload = obj.get("payload") or {}
-            if payload.get("type") != "user_message":
-                continue
-            moment = _to_local(obj.get("timestamp"))
+        for timestamp, _ in codex_prompts(lines):
+            moment = _to_local(timestamp)
             if moment:
                 _add(days, moment, slot_minutes)
                 prompts += 1
