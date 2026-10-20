@@ -258,6 +258,10 @@ def claude_human_text(obj: dict) -> str | None:
 _CODEX_SYNTHETIC_PREFIXES = (
     "The following is the Codex agent history",
     "<send_user_message_question_reply>",
+    "<heartbeat>",
+    "<external_codex_apps_open_page>",
+    "<environment_context>",
+    "# AGENTS.md instructions",
 )
 _CODEX_BROWSER_CONTEXT = re.compile(r"<in-app-browser-context.*?</in-app-browser-context>", re.DOTALL)
 

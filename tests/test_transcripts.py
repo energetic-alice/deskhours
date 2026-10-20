@@ -183,14 +183,26 @@ def test_codex_counts_one_prompt_once_when_both_formats_record_it(tmp_path):
         "The following is the Codex agent history whose request action you are assisting with.",
         '<send_user_message_question_reply>\n[{"question": "q", "answer": "a"}]',
         '<in-app-browser-context source="ambient-ui-state">tab state</in-app-browser-context>',
+        '<heartbeat>scheduled background task</heartbeat>',
+        '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>',
+        '<environment_context>injected session data</environment_context>',
+        '# AGENTS.md instructions for /home/dev/project',
     ],
 )
-def test_codex_ignores_items_nobody_typed(tmp_path, text):
+@pytest.mark.parametrize("event_format", ["item", "legacy"])
+def test_codex_ignores_items_nobody_typed(tmp_path, text, event_format):
+    event = codex_item("2026-09-07T09:04:00Z", text)
+    if event_format == "legacy":
+        event = {
+            "type": "event_msg",
+            "timestamp": "2026-09-07T09:04:00Z",
+            "payload": {"type": "user_message", "message": text},
+        }
     write_lines(
         tmp_path / "2026" / "09" / "07" / "rollout-a.jsonl",
         [
             {"type": "session_meta", "payload": {"cwd": "/home/dev/web-api"}},
-            codex_item("2026-09-07T09:04:00Z", text),
+            event,
         ],
     )
     assert transcripts.collect_codex(days(), SLOT, roots=[tmp_path]) == 0
