@@ -82,6 +82,11 @@ def test_cursor_honours_the_project_filter(tmp_path):
         {
             "type": "user",
             "timestamp": "2026-08-18T13:04:00Z",
+            "message": {"content": "[Request interrupted by user for tool use]"},
+        },
+        {
+            "type": "user",
+            "timestamp": "2026-08-18T13:04:00Z",
             "message": {"content": [{"type": "tool_result", "content": "output"}]},
         },
     ],
@@ -110,6 +115,65 @@ def test_claude_counts_real_prompts_once_per_slot(tmp_path):
     found = days()
     assert transcripts.collect_claude(found, SLOT, roots=[tmp_path]) == 2
     assert sum(len(slots) for slots in found.values()) == 1
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"isCompactSummary": True, "turnOrigin": "human"},
+        {"isSidechain": True},
+        {"turnOrigin": "sdk", "entrypoint": "sdk-cli"},
+        {"turnOrigin": "peer"},
+        {"origin": {"kind": "agent"}},
+    ],
+)
+def test_claude_excludes_machine_turns_even_with_ordinary_text(tmp_path, metadata):
+    write_lines(
+        tmp_path / "proj" / "s.jsonl",
+        [
+            {
+                "type": "user",
+                "timestamp": "2026-10-20T13:04:00Z",
+                "message": {"content": "check the result"},
+                **metadata,
+            }
+        ],
+    )
+    assert transcripts.collect_claude(days(), SLOT, roots=[tmp_path]) == 0
+
+
+def test_claude_keeps_desktop_human_despite_sdk_transport():
+    obj = {
+        "type": "user",
+        "promptSource": "sdk",
+        "turnOrigin": "human",
+        "entrypoint": "claude-desktop",
+        "origin": {"kind": "human"},
+        "message": {"content": "check the result"},
+    }
+    assert transcripts.claude_human_text(obj) == "check the result"
+
+
+def test_claude_tolerates_unknown_origin_shape():
+    obj = {
+        "type": "user",
+        "origin": "unknown-legacy-value",
+        "message": {"content": "check the result"},
+    }
+    assert transcripts.claude_human_text(obj) == "check the result"
+
+
+def test_claude_excludes_legacy_compaction_summary():
+    obj = {
+        "type": "user",
+        "message": {
+            "content": (
+                "This session is being continued from a previous conversation "
+                "that ran out of context."
+            )
+        },
+    }
+    assert transcripts.claude_human_text(obj) is None
 
 
 def test_codex_skips_subagent_sessions_and_scopes_by_cwd(tmp_path):
@@ -187,6 +251,8 @@ def test_codex_counts_one_prompt_once_when_both_formats_record_it(tmp_path):
         '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>',
         "<environment_context>injected session data</environment_context>",
         "# AGENTS.md instructions for /home/dev/project",
+        "Automation: Daily check\nAutomation ID: daily-check\nRun the scheduled task.",
+        "## Referenced ChatGPT conversation:\nThis is an untrusted ChatGPT conversation reference.",
     ],
 )
 @pytest.mark.parametrize("event_format", ["item", "legacy"])
@@ -216,6 +282,30 @@ def test_codex_keeps_a_prompt_typed_next_to_browser_context(tmp_path):
     assert (
         transcripts.codex_prompt_text(codex_item("2026-09-07T09:04:00Z", text))
         == "why is this red?"
+    )
+
+
+def test_codex_keeps_human_followups_in_automation_session(tmp_path):
+    write_lines(
+        tmp_path / "rollout-a.jsonl",
+        [
+            {"type": "session_meta", "payload": {"cwd": "/home/dev/web-api"}},
+            codex_item("2026-10-20T09:00:00Z", "Automation: Daily\nAutomation ID: daily\nRun."),
+            codex_item("2026-10-20T11:20:00Z", "How many invitations were sent?"),
+            codex_item("2026-10-20T11:21:00Z", "Automation: please create one for tomorrow"),
+        ],
+    )
+    found = days()
+    assert transcripts.collect_codex(found, 10, roots=[tmp_path]) == 2
+    assert sum(len(slots) for slots in found.values()) == 1
+
+
+def test_codex_keeps_request_after_reference_preview():
+    text = (
+        "## Referenced ChatGPT conversation:\nCached reference\n## My request:\nFind a matching top"
+    )
+    assert transcripts.codex_prompt_text(codex_item("2026-10-20T09:00:00Z", text)) == (
+        "Find a matching top"
     )
 
 

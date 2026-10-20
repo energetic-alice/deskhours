@@ -47,8 +47,13 @@ deskhours sources --scan ~/Volumes/work   # only if a harness lives somewhere un
 `sources` prints each directory, whether it exists, and how many prompts and days came from it, so a harness that contributes nothing is visibly missing rather than silently absent. If yours lives somewhere the list above does not cover, `--scan` searches a directory you name, and an override then points at it for good (several paths join with the platform path separator: `:`, or `;` on Windows).
 
 Only turns a person typed count. Agent replies, tool output, injected reminders,
-scheduled heartbeats, page-open events and subagent sessions are skipped, so a long
+scheduled heartbeats and automation kickoff messages, page-open events, Claude
+compaction summaries, SDK/peer turns and subagent sessions are skipped, so a long
 unattended run or an overnight watcher does not become working hours.
+
+The SDK transport alone is not excluded: Claude Desktop also uses it for real human
+turns. Human follow-ups in an automation chat still count. Old logs without origin
+metadata cannot reliably distinguish a person from an agent typing through the UI.
 
 These session logs are an internal detail of each tool, not a published format, so a new version can change them. `deskhours sources` is how you notice: a harness that used to report prompts and now reports none has either gone unused or changed its layout.
 

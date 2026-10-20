@@ -175,6 +175,8 @@ _CLAUDE_SYNTHETIC_PREFIXES = (
     "<command-name>",
     "<command-message>",
     "<system-reminder",
+    "[Request interrupted by user",
+    "This session is being continued from a previous conversation that ran out of context.",
 )
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -233,7 +235,16 @@ def claude_human_text(obj: dict) -> str | None:
     notifications and slash-command output under the same "user" type. Those are not
     contact time, and overnight monitor events would otherwise read as active hours.
     """
-    if obj.get("type") != "user" or obj.get("isMeta"):
+    origin = obj.get("origin")
+    origin_kind = origin.get("kind") if isinstance(origin, dict) else None
+    if (
+        obj.get("type") != "user"
+        or obj.get("isMeta")
+        or obj.get("isCompactSummary")
+        or obj.get("isSidechain")
+        or obj.get("turnOrigin") in {"sdk", "peer", "agent"}
+        or origin_kind in {"sdk", "peer", "agent"}
+    ):
         return None
     content = obj.get("message", {}).get("content")
     if isinstance(content, str):
@@ -292,6 +303,14 @@ def codex_prompt_text(obj: dict) -> str | None:
     text = _CODEX_BROWSER_CONTEXT.sub("", text).strip()
     if not text or text.startswith(_CODEX_SYNTHETIC_PREFIXES):
         return None
+    if text.startswith("Automation:") and re.search(r"(?m)^Automation ID:\s*\S+", text):
+        return None
+    if text.startswith("## Referenced ChatGPT conversation:"):
+        # A reference preview can be logged separately, or bundled with a real request.
+        _, marker, request = text.partition("\n## My request:")
+        if not marker:
+            return None
+        return request.strip() or None
     return text
 
 
