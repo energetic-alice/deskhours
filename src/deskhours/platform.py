@@ -27,14 +27,25 @@ def backend_name(platform: str | None = None) -> str:
         raise UnsupportedPlatformError(f"Unsupported platform: {platform}") from exc
 
 
-def _load(kind: str) -> ModuleType:
+def load_backend(kind: str) -> ModuleType:
+    """The implementation of one capability for the system we are running on.
+
+    Every capability follows the same layout, `deskhours.<kind>.<system>`, so one lookup
+    serves them all. A capability that has no module for this system is a gap in the port
+    rather than a bug, and says so.
+    """
     name = backend_name()
-    return importlib.import_module(f"deskhours.{kind}.{name}")
+    try:
+        return importlib.import_module(f"deskhours.{kind}.{name}")
+    except ModuleNotFoundError as exc:
+        raise UnsupportedPlatformError(
+            f"deskhours {kind} is not implemented for {name} yet. See packagers/ for drafts."
+        ) from exc
 
 
 def idle_seconds() -> float:
-    return float(_load("idle").idle_seconds())
+    return float(load_backend("idle").idle_seconds())
 
 
 def notify(title: str, message: str, *, dialog: bool = False) -> None:
-    _load("notify").notify(title, message, dialog=dialog)
+    load_backend("notify").notify(title, message, dialog=dialog)

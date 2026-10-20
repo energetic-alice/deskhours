@@ -5,17 +5,46 @@ from __future__ import annotations
 import argparse
 import sys
 
-from deskhours import __version__, install
+from deskhours import __version__, install, transcripts
 from deskhours.config import (
+    ALL_SOURCES,
+    DEFAULT_SOURCE,
     IDLE_THRESHOLD_SEC,
     NOTIFY_THRESHOLD_H,
     SLOT_MINUTES,
+    Settings,
 )
 from deskhours.platform import UnsupportedPlatformError
 from deskhours.tick import format_status, run_tick
 
 
+def _add_project(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--project",
+        help="with --source agents, count only sessions of projects matching this name",
+    )
+
+
+def _add_slot(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--slot",
+        type=int,
+        default=SLOT_MINUTES,
+        help=f"slot size in minutes (default: {SLOT_MINUTES})",
+    )
+
+
 def _add_common(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--source",
+        choices=ALL_SOURCES,
+        default=DEFAULT_SOURCE,
+        help=(
+            "what counts as working: keyboard and mouse activity (input) "
+            f"or prompts sent to coding agents (agents) (default: {DEFAULT_SOURCE})"
+        ),
+    )
+    _add_project(parser)
     parser.add_argument(
         "--threshold",
         type=float,
@@ -26,14 +55,10 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
         "--idle-threshold",
         type=int,
         default=IDLE_THRESHOLD_SEC,
-        help=f"seconds without input before idle (default: {IDLE_THRESHOLD_SEC})",
+        help=f"seconds without input before idle, --source input only "
+        f"(default: {IDLE_THRESHOLD_SEC})",
     )
-    parser.add_argument(
-        "--slot",
-        type=int,
-        default=SLOT_MINUTES,
-        help=f"slot size in minutes (default: {SLOT_MINUTES})",
-    )
+    _add_slot(parser)
     parser.add_argument(
         "--dialog",
         action="store_true",
@@ -42,18 +67,15 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 
 
 def cmd_tick(args: argparse.Namespace) -> int:
-    try:
-        result = run_tick(
-            idle_threshold=args.idle_threshold,
-            slot_minutes=args.slot,
-            notify_threshold=args.threshold,
-            dry_run=args.dry_run,
-            dialog=args.dialog,
-        )
-    except (UnsupportedPlatformError, RuntimeError, OSError) as exc:
-        print(f"deskhours: {exc}", file=sys.stderr)
-        return 1
-
+    result = run_tick(
+        source=args.source,
+        project=args.project,
+        idle_threshold=args.idle_threshold,
+        slot_minutes=args.slot,
+        notify_threshold=args.threshold,
+        dry_run=args.dry_run,
+        dialog=args.dialog,
+    )
     if args.dry_run or args.verbose:
         print(
             format_status(
@@ -65,31 +87,59 @@ def cmd_tick(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sources(args: argparse.Namespace) -> int:
+    """Show where each harness is read from and what came back.
+
+    On a new machine this is the difference between trusting the number and knowing why a
+    harness contributed nothing: not installed, moved, or simply unused that day.
+    """
+    _, per_harness = transcripts.collect_all(slot_minutes=args.slot, project=args.project)
+    for harness, roots in transcripts.all_roots().items():
+        prompts, day_count = per_harness[harness]
+        note = "" if prompts else "   <- nothing found"
+        print(f"{harness:<7} {prompts:>6} prompts  {day_count:>4} days{note}")
+        for root in roots:
+            print(f"        {'ok     ' if root.is_dir() else 'missing'}  {root}")
+
+    print("\nLooked under:", ", ".join(str(p) for p in transcripts.candidate_parents()))
+    if args.scan:
+        print(f"Searching {args.scan} as well. This can take a while.")
+        for harness, found in transcripts.scan(args.scan).items():
+            for path in found:
+                print(f"        found    {path}  ({harness})")
+        print("Copies inside a sandboxed agent session are left out on purpose.")
+
+    print(
+        "A harness kept somewhere else can be pointed at with "
+        f"{' or '.join(transcripts.ENV_OVERRIDES.values())}"
+        f"{'.' if args.scan else ', or searched for with --scan DIR.'}"
+    )
+    return 0
+
+
 def cmd_install(args: argparse.Namespace) -> int:
-    try:
-        return install.install(
+    return install.install(
+        Settings(
+            source=args.source,
+            project=args.project,
             threshold=args.threshold,
             idle_threshold=args.idle_threshold,
             slot=args.slot,
             dialog=args.dialog,
         )
-    except UnsupportedPlatformError as exc:
-        print(f"deskhours: {exc}", file=sys.stderr)
-        return 1
+    )
 
 
 def cmd_uninstall(_args: argparse.Namespace) -> int:
-    try:
-        return install.uninstall()
-    except UnsupportedPlatformError as exc:
-        print(f"deskhours: {exc}", file=sys.stderr)
-        return 1
+    return install.uninstall()
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deskhours",
-        description="Count computer activity hours from keyboard/mouse idle state.",
+        description=(
+            "Count working hours from keyboard and mouse activity, or from coding-agent prompts."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"deskhours {__version__}")
     sub = parser.add_subparsers(dest="command")
@@ -113,20 +163,46 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(status)
     status.set_defaults(func=cmd_tick, dry_run=True, verbose=False)
 
-    install_p = sub.add_parser("install", help="install background poller (macOS)")
+    sources_p = sub.add_parser(
+        "sources", help="show which transcript directories are found on this machine"
+    )
+    _add_project(sources_p)
+    _add_slot(sources_p)
+    sources_p.add_argument(
+        "--scan",
+        metavar="DIR",
+        help="also search this directory tree for a harness kept somewhere unusual",
+    )
+    sources_p.set_defaults(func=cmd_sources)
+
+    install_p = sub.add_parser(
+        "install", help="install background poller (macOS LaunchAgent, Windows Task Scheduler)"
+    )
     _add_common(install_p)
     install_p.set_defaults(func=cmd_install)
 
-    uninstall_p = sub.add_parser("uninstall", help="remove background poller (macOS)")
+    uninstall_p = sub.add_parser("uninstall", help="remove background poller")
     uninstall_p.set_defaults(func=cmd_uninstall)
 
     return parser
 
 
+GLOBAL_FLAGS = ("-h", "--help", "--version")
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Run a poll when no subcommand is given, since that is what the scheduler calls.
+
+    Flags that belong to the program itself must not be handed to that implied subcommand:
+    it does not define them, and the error would blame the user for a correct command.
+    """
     if argv is None:
         argv = sys.argv[1:]
-    if not argv or argv[0].startswith("-"):
+    if not argv or (argv[0].startswith("-") and argv[0] not in GLOBAL_FLAGS):
         argv = ["tick", *argv]
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (UnsupportedPlatformError, RuntimeError, OSError, ValueError) as exc:
+        print(f"deskhours: {exc}", file=sys.stderr)
+        return 1

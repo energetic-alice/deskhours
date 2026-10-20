@@ -3,41 +3,16 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
-from deskhours.config import LAUNCH_AGENT_LABEL, POLL_INTERVAL_SEC
+from deskhours.config import APP_NAME, LAUNCH_AGENT_LABEL, POLL_INTERVAL_SEC, Settings
+from deskhours.install import program_arguments
 from deskhours.state import default_state_path
 
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
-
-
-def program_arguments(
-    *,
-    threshold: float,
-    idle_threshold: int,
-    slot: int,
-    dialog: bool,
-) -> list[str]:
-    exe = shutil.which("deskhours")
-    if exe:
-        args = [exe, "tick"]
-    else:
-        args = [sys.executable, "-m", "deskhours", "tick"]
-    args += [
-        "--threshold",
-        str(threshold),
-        "--idle-threshold",
-        str(idle_threshold),
-        "--slot",
-        str(slot),
-    ]
-    if dialog:
-        args.append("--dialog")
-    return args
 
 
 def render_plist(program: list[str]) -> str:
@@ -59,9 +34,9 @@ def render_plist(program: list[str]) -> str:
             <key>RunAtLoad</key>
             <true/>
             <key>StandardOutPath</key>
-            <string>/tmp/deskhours.log</string>
+            <string>/tmp/{APP_NAME}.log</string>
             <key>StandardErrorPath</key>
-            <string>/tmp/deskhours.err</string>
+            <string>/tmp/{APP_NAME}.err</string>
         </dict>
         </plist>
         """
@@ -70,30 +45,17 @@ def render_plist(program: list[str]) -> str:
 
 def _xml_escape(value: str) -> str:
     return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     )
 
 
-def install(
-    *,
-    threshold: float,
-    idle_threshold: int,
-    slot: int,
-    dialog: bool,
-) -> int:
-    program = program_arguments(
-        threshold=threshold,
-        idle_threshold=idle_threshold,
-        slot=slot,
-        dialog=dialog,
-    )
+def install(settings: Settings) -> int:
+    program = program_arguments(settings)
     plist = render_plist(program)
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    if PLIST_PATH.exists():
+    replaced = PLIST_PATH.exists()
+    if replaced:
         subprocess.run(["launchctl", "unload", "-w", str(PLIST_PATH)], check=False)
 
     PLIST_PATH.write_text(plist, encoding="utf-8")
@@ -102,8 +64,9 @@ def install(
         print("deskhours: launchctl load failed", file=sys.stderr)
         return result.returncode
 
-    print(f"Installed LaunchAgent: {PLIST_PATH}")
-    print(f"Polls every {POLL_INTERVAL_SEC // 60} minutes. State file: {default_state_path()}")
+    print(f"{'Replaced' if replaced else 'Installed'} LaunchAgent: {PLIST_PATH}")
+    print(f"Counting: {settings.source}. Polls every {POLL_INTERVAL_SEC // 60} minutes.")
+    print(f"State file: {default_state_path(settings.source)}")
     print("Using:", " ".join(program))
     return 0
 

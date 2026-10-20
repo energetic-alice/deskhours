@@ -18,8 +18,5 @@ def notify(title: str, message: str, *, dialog: bool = False) -> None:
             f'with title "{title_e}" with icon caution'
         )
     else:
-        script = (
-            f'display notification "{message_e}" with title "{title_e}" '
-            f'sound name "Glass"'
-        )
+        script = f'display notification "{message_e}" with title "{title_e}" sound name "Glass"'
     subprocess.run(["osascript", "-e", script], check=False)
